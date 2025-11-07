@@ -218,6 +218,7 @@ def paginate_books_by_ratingperpage():
 
     print("📘 Page 1:")
     for doc in docs:
+        print("Book addedd Successfully")
         print(f"{doc.id}: {doc.to_dict()['rating']}")
 
     # Return the last doc for pagination
