@@ -1,9 +1,8 @@
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import firestore
-import datetime
 from google.cloud.firestore_v1.base_query import FieldFilter
-
+import datetime
 
 cred = credentials.Certificate("app.json")
 firebase_admin.initialize_app(cred)
@@ -335,6 +334,250 @@ def batch_write20():
     batch.commit()
     print("Batch Write Successful")
 #batch_write20()
+
+"""21. Atomic Multi-Collection Transaction
+
+Write a transaction that:
+
+Creates a new invoice document in invoices/.
+
+Updates the related customer document’s totalSpent by the invoice’s amount.
+
+Adds a reference to the invoice inside customers/{id}/invoicesList."""
+
+def transaction21():
+    transaction = db.transaction()
+    invoice_ref = db.collection("invoices").document()
+    customer_ref = db.collection("customers").document("customer1")
+
+    @firestore.transactional
+    def create_invoice(transaction, invoice_ref, customer_ref):
+        customer_snapshot = customer_ref.get(transaction=transaction)
+        amount = 500  # Example amount
+        transaction.set(invoice_ref, {"amount": amount, "timestamp": firestore.SERVER_TIMESTAMP})
+        transaction.update(customer_ref, {"totalSpent": firestore.Increment(amount)})
+        transaction.set(customer_ref.collection("invoicesList").document(invoice_ref.id), {"invoiceRef": invoice_ref})
+        print("Transaction Successful")
+
+    create_invoice(transaction, invoice_ref, customer_ref)
+#transaction21()
+
+"""22. Transaction with Conditional Field Creation
+
+Create a transaction that:
+
+Checks if a profileCompletion field exists in users/user123.
+
+If it doesn’t, set it to 0.
+
+Then, increment it by 10 each time the transaction runs."""
+
+
+def transaction22():
+    transaction = db.transaction()
+    user_ref = db.collection("users").document("user123")
+
+    @firestore.transactional
+    def update_profile_completion(transaction, user_ref):
+        snapshot = user_ref.get(transaction=transaction)
+        data = snapshot.to_dict()
+        if "profileCompletion" not in data:
+            transaction.update(user_ref, {"profileCompletion": 0})
+        transaction.update(user_ref, {"profileCompletion": firestore.Increment(10)})
+        print("Transaction Successful")
+
+    update_profile_completion(transaction, user_ref)
+#transaction22()
+
+"""23. Transaction with Nested Data Validation
+
+Implement a transaction that updates a projects/project1 document’s progress 
+field to 100 only if all subtasks inside the projects/project1/subtasks subcollection have completed == True."""
+
+def transaction23():
+    transaction = db.transaction()
+    project_ref = db.collection("projects").document("project1")
+    subtasks_ref = project_ref.collection("subtasks")
+
+    @firestore.transactional
+    def complete_project(transaction, project_ref):
+        subtasks = subtasks_ref.stream()
+        for sub in subtasks:
+            if not sub.to_dict().get("completed", False):
+                print("Some subtasks incomplete — Transaction Cancelled")
+                return
+        transaction.update(project_ref, {"progress": 100})
+        print("All subtasks done — Project marked complete")
+
+    complete_project(transaction, project_ref)
+#transaction23()
+
+"""24. Cross-Collection Batch Write
+
+Use a batch write to:
+
+Update all documents in products collection where category == "electronics", adding the field discountApplied = True.
+
+Update the analytics/discountStats document to record the current timestamp."""
+
+
+
+def batch_write24():
+    batch = db.batch()
+    products = db.collection("products").where(filter=FieldFilter("category", "==", "electronics")).stream()
+    for doc in products:
+        batch.update(doc.reference, {"discountApplied": True})
+    analytics_ref = db.collection("analytics").document("discountStats")
+    batch.update(analytics_ref, {"lastUpdated": firestore.SERVER_TIMESTAMP})
+    batch.commit()
+    print("Batch Write Successful")
+#batch_write24()
+
+"""25. Conditional Delete Transaction
+
+Create a transaction that:
+
+Reads a comments/comment123 document.
+
+Deletes it only if the flagCount field is greater than or equal to 3.
+
+Otherwise, print "Not enough flags to delete"."""
+
+def transaction25():
+    transaction = db.transaction()
+    comment_ref = db.collection("comments").document("comment123")
+
+    @firestore.transactional
+    def delete_if_flagged(transaction, comment_ref):
+        snapshot = comment_ref.get(transaction=transaction)
+        if snapshot.to_dict()["flagCount"] >= 3:
+            transaction.delete(comment_ref)
+            print("Comment deleted")
+        else:
+            print("Not enough flags to delete")
+
+    delete_if_flagged(transaction, comment_ref)
+#transaction25()
+
+"""26. Batch Write with Mixed Operations
+
+Use a single batch to:
+
+Create one new promo document.
+
+Update an existing settings document.
+
+Delete an old archive document.
+(All three must commit together.)"""
+
+
+def batch_write26():
+    batch = db.batch()
+    promo_ref = db.collection("promos").document()
+    settings_ref = db.collection("config").document("settings")
+    archive_ref = db.collection("archives").document("oldArchive")
+
+    batch.set(promo_ref, {"active": True, "created": firestore.SERVER_TIMESTAMP})
+    batch.update(settings_ref, {"version": firestore.Increment(1)})
+    batch.delete(archive_ref)
+    batch.commit()
+    print("Batch Write Successful")
+#batch_write26()
+
+"""27. Transaction with Multiple Increment Fields
+
+Implement a transaction that:
+
+Reads a users/user456 document.
+
+Increments both postsCount and likesCount by 1 atomically."""
+
+def transaction27():
+    transaction = db.transaction()
+    user_ref = db.collection("users").document("user456")
+
+    @firestore.transactional
+    def update_counters(transaction, user_ref):
+        transaction.update(user_ref, {
+            "postsCount": firestore.Increment(1),
+            "likesCount": firestore.Increment(1)
+        })
+        print("Transaction Successful")
+
+    update_counters(transaction, user_ref)
+#transaction27()
+
+"""28. Batch Write with Dynamic Query Results
+
+Use a batch write to:
+
+Delete all orders where status == "cancelled".
+
+Then, create a summary document in reports/cleanup with the number of deleted documents."""
+
+
+def batch_write28():
+    batch = db.batch()
+    cancelled_orders = db.collection("orders").where(filter=FieldFilter("status", "==", "cancelled")).stream()
+    count = 0
+    for order in cancelled_orders:
+        batch.delete(order.reference)
+        count += 1
+    report_ref = db.collection("reports").document("cleanup")
+    batch.set(report_ref, {"deletedOrders": count, "timestamp": firestore.SERVER_TIMESTAMP})
+    batch.commit()
+    print("Batch Write Successful")
+#batch_write28()
+
+"""29. Transaction for Payment Validation
+
+Write a transaction that:
+
+Reads an orders/order789 document.
+
+Verifies that paymentStatus == "pending".
+
+If yes, updates it to "completed" and increases the sellerRevenue in sellers/seller1 by the order’s amount."""
+
+def transaction29():
+    transaction = db.transaction()
+    order_ref = db.collection("orders").document("order789")
+    seller_ref = db.collection("sellers").document("seller1")
+
+    @firestore.transactional
+    def process_payment(transaction, order_ref, seller_ref):
+        order_snapshot = order_ref.get(transaction=transaction)
+        if order_snapshot.to_dict()["paymentStatus"] == "pending":
+            amount = order_snapshot.to_dict()["amount"]
+            transaction.update(order_ref, {"paymentStatus": "completed"})
+            transaction.update(seller_ref, {"sellerRevenue": firestore.Increment(amount)})
+            print("Payment processed")
+        else:
+            print("Order already processed")
+
+    process_payment(transaction, order_ref, seller_ref)
+#transaction29()
+
+"""30. Batch Write with Array Operations
+
+Use a batch to:
+
+Add a new tag (input from user) to all documents in the posts collection using ArrayUnion.
+
+Also update an analytics/tags document to include that same tag in its usedTags array."""
+
+def batch_write30():
+    batch = db.batch()
+    tag = input("Enter new tag: ")
+    posts = db.collection("posts").stream()
+    for post in posts:
+        batch.update(post.reference, {"tags": firestore.ArrayUnion([tag])})
+    analytics_ref = db.collection("analytics").document("tags")
+    batch.update(analytics_ref, {"usedTags": firestore.ArrayUnion([tag])})
+    batch.commit()
+    print("Batch Write Successful")
+#batch_write30()
+
 
 
     
